@@ -4,7 +4,36 @@ This project provides a single Bash script for installing and updating a Hysteri
 
 The script fetches the latest upstream release from GitHub at runtime. It does not hard-code a Hysteria version.
 
+## Quick Install (remote one-liner)
+
+Run directly from GitHub on your VPS. The installer is interactive (it asks for
+port, TLS mode, domain, etc.), and it automatically reattaches input to your
+terminal, so the prompts work even through a pipe:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ethanzhrepo/hysteria2-1click/main/install.sh | sudo bash
+```
+
+Update only the Hysteria binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ethanzhrepo/hysteria2-1click/main/install.sh | sudo bash -s -- update
+```
+
+Prefer not to pipe into a shell? Either of these is equivalent:
+
+```bash
+# Process substitution (stdin stays attached to the terminal)
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/ethanzhrepo/hysteria2-1click/main/install.sh)
+
+# Download first, inspect, then run
+curl -fsSL https://raw.githubusercontent.com/ethanzhrepo/hysteria2-1click/main/install.sh -o install.sh
+sudo bash install.sh
+```
+
 ## Usage
+
+If you cloned the repository:
 
 Install:
 

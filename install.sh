@@ -897,6 +897,14 @@ update_flow() {
 }
 
 main() {
+  # When run via `curl ... | bash`, stdin is the script text itself, so the
+  # interactive prompts below cannot read the user's answers. Reattach stdin to
+  # the controlling terminal when one is available. Skipped when stdin is
+  # already a terminal (e.g. `bash install.sh` or `bash <(curl ...)`).
+  if [[ ! -t 0 ]] && { : </dev/tty; } 2>/dev/null; then
+    exec </dev/tty
+  fi
+
   local command="${1:-install}"
   case "$command" in
     install)
@@ -915,6 +923,8 @@ main() {
   esac
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+# Run main when the script is executed directly (including `curl ... | bash`),
+# but not when it is sourced (e.g. by the test suite).
+if ! (return 0 2>/dev/null); then
   main "$@"
 fi
