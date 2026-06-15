@@ -322,7 +322,7 @@ prompt_default() {
   local prompt="$1"
   local default="$2"
   local value
-  read -r -p "$prompt [$default]: " value
+  read -r -u 3 -p "$prompt [$default]: " value
   printf '%s\n' "${value:-$default}"
 }
 
@@ -330,7 +330,7 @@ prompt_required() {
   local prompt="$1"
   local value
   while true; do
-    read -r -p "$prompt: " value
+    read -r -u 3 -p "$prompt: " value
     if [[ -n "$value" ]]; then
       printf '%s\n' "$value"
       return 0
@@ -342,7 +342,7 @@ prompt_required() {
 prompt_secret_or_generate() {
   local prompt="$1"
   local value
-  read -r -s -p "$prompt (leave empty to auto-generate): " value
+  read -r -s -u 3 -p "$prompt (leave empty to auto-generate): " value
   printf '\n' >&2
   if [[ -z "$value" ]]; then
     openssl rand -base64 32
@@ -362,7 +362,7 @@ prompt_yes_no() {
   esac
 
   while true; do
-    read -r -p "$prompt [$suffix]: " value
+    read -r -u 3 -p "$prompt [$suffix]: " value
     value="${value:-$default}"
     case "$value" in
       Y | y | yes | YES) return 0 ;;
@@ -631,7 +631,7 @@ handle_existing_install() {
 
   warn "$SERVER_CONFIG already exists."
   while true; do
-    read -r -p "Choose: reinstall and overwrite [r], update binary only [u], exit [e] (default e): " choice
+    read -r -u 3 -p "Choose: reinstall and overwrite [r], update binary only [u], exit [e] (default e): " choice
     choice="${choice:-e}"
     case "$choice" in
       r | R) return 0 ;;
@@ -657,7 +657,7 @@ prompt_port() {
 prompt_tls_mode() {
   local choice
   while true; do
-    read -r -p "TLS mode: ACME recommended [1], self-signed [2] (default 1): " choice
+    read -r -u 3 -p "TLS mode: ACME recommended [1], self-signed [2] (default 1): " choice
     choice="${choice:-1}"
     case "$choice" in
       1 | a | A | acme | ACME)
@@ -721,7 +721,7 @@ install_flow() {
   if [[ -n "$obfs_password" ]]; then
     warn "Masquerade is skipped because obfs disables standard HTTP/3 compatibility."
   else
-    read -r -p "Masquerade proxy URL [$DEFAULT_MASQUERADE_URL, enter none to disable]: " masquerade_url
+    read -r -u 3 -p "Masquerade proxy URL [$DEFAULT_MASQUERADE_URL, enter none to disable]: " masquerade_url
   fi
   if [[ -z "$masquerade_url" && -z "$obfs_password" ]]; then
     masquerade_url="$DEFAULT_MASQUERADE_URL"
@@ -897,12 +897,16 @@ update_flow() {
 }
 
 main() {
-  # When run via `curl ... | bash`, stdin is the script text itself, so the
-  # interactive prompts below cannot read the user's answers. Reattach stdin to
-  # the controlling terminal when one is available. Skipped when stdin is
-  # already a terminal (e.g. `bash install.sh` or `bash <(curl ...)`).
-  if [[ ! -t 0 ]] && { : </dev/tty; } 2>/dev/null; then
-    exec </dev/tty
+  # Interactive prompts read from fd 3 rather than stdin. When the script is fed
+  # through a pipe (e.g. `curl ... | bash`), stdin carries the script text, so
+  # fd 3 is pointed at the controlling terminal to read the user's answers.
+  # Leaving stdin untouched is important: after the final command, bash reads
+  # EOF from it and exits cleanly, instead of hanging while reading the terminal
+  # as if it were more script.
+  if { : </dev/tty; } 2>/dev/null; then
+    exec 3</dev/tty
+  else
+    exec 3<&0
   fi
 
   local command="${1:-install}"
