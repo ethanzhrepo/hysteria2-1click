@@ -53,6 +53,12 @@ Update only the Hysteria binary:
 sudo bash install.sh update
 ```
 
+Print the client share link and QR code again:
+
+```bash
+sudo bash install.sh share
+```
+
 Show help:
 
 ```bash
@@ -67,6 +73,28 @@ bash install.sh --help
 - systemd service: `/etc/systemd/system/hysteria-server.service`
 
 `update` preserves all configuration, certificate, key, and service files. It backs up the old binary before replacement and attempts rollback if version verification or service restart fails.
+
+## Client Share Link & QR Code
+
+When the install finishes, the script prints a `hysteria2://` share link and a
+terminal QR code, ready to import into clients such as Shadowrocket, Stash,
+NekoBox, or v2rayN. Special characters in the password are URL-encoded
+automatically.
+
+To print the link and QR again at any time (it reads `/etc/hysteria/client.yaml`):
+
+```bash
+sudo bash install.sh share
+```
+
+Or remotely:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ethanzhrepo/hysteria2-1click/main/install.sh | sudo bash -s -- share
+```
+
+The QR code is rendered with `qrencode`. If it is not installed, the script
+tries to install it automatically; if that fails it still prints the text link.
 
 ## Installation Prompts
 

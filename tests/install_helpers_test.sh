@@ -84,6 +84,35 @@ test_config_generation() {
   [[ "$cfg" == *'auth: "password value"'* ]] || fail "client config has auth"
 }
 
+test_url_encode() {
+  assert_eq "abc" "$(url_encode "abc")" "leaves unreserved chars"
+  assert_eq "a%2Bb%2Fc%3D" "$(url_encode "a+b/c=")" "encodes base64 specials"
+  assert_eq "AB%3ACD" "$(url_encode "AB:CD")" "encodes colon"
+}
+
+test_yaml_unquote() {
+  assert_eq "abc" "$(yaml_unquote '"abc"')" "strips quotes"
+  assert_eq 'a"b\c' "$(yaml_unquote '"a\"b\\c"')" "unescapes quote and slash"
+  assert_eq "plain" "$(yaml_unquote 'plain')" "leaves unquoted value"
+}
+
+test_compose_share_uri() {
+  assert_eq \
+    'hysteria2://pass%2B%2F%3D@example.com:443/#Hysteria2-example.com' \
+    "$(compose_share_uri 'pass+/=' 'example.com:443' 'acme' 'example.com' '' '')" \
+    "acme uri encodes auth and adds no params"
+
+  assert_eq \
+    'hysteria2://pw@1.2.3.4:443/?sni=1.2.3.4&pinSHA256=AB%3ACD#Hysteria2-1.2.3.4' \
+    "$(compose_share_uri 'pw' '1.2.3.4:443' 'selfsigned' '1.2.3.4' 'AB:CD' '')" \
+    "selfsigned uri adds sni and pin"
+
+  assert_eq \
+    'hysteria2://pw@example.com:443/?obfs=salamander&obfs-password=ob%2Bfs#Hysteria2-example.com' \
+    "$(compose_share_uri 'pw' 'example.com:443' 'acme' '' '' 'ob+fs')" \
+    "obfs uri adds salamander params"
+}
+
 main() {
   test_validate_port
   test_yaml_quote
@@ -92,6 +121,9 @@ main() {
   test_release_parsing
   test_hash_parsing
   test_config_generation
+  test_url_encode
+  test_yaml_unquote
+  test_compose_share_uri
   printf 'All helper tests passed\n'
 }
 

@@ -40,6 +40,7 @@ Usage:
   bash install.sh             Install Hysteria 2 server
   bash install.sh install     Install Hysteria 2 server
   bash install.sh update      Update /usr/local/bin/hysteria only
+  bash install.sh share       Print the client share link and QR code
   bash install.sh --help      Show this help
 
 Install mode writes:
@@ -49,6 +50,8 @@ Install mode writes:
   /etc/systemd/system/hysteria-server.service
 
 Update mode preserves all config, certificate, and systemd files.
+Share mode reads /etc/hysteria/client.yaml and prints a hysteria2:// link
+plus a scannable QR code (installs qrencode if available).
 EOF
 }
 
@@ -63,6 +66,32 @@ yaml_quote() {
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
   printf '"%s"' "$value"
+}
+
+yaml_unquote() {
+  local value="${1:-}"
+  if [[ ${#value} -ge 2 && "$value" == \"*\" ]]; then
+    value="${value:1:${#value}-2}"
+    value="${value//\\\"/\"}"
+    value="${value//\\\\/\\}"
+  fi
+  printf '%s' "$value"
+}
+
+url_encode() {
+  local string="${1:-}"
+  local i char out=""
+  for ((i = 0; i < ${#string}; i++)); do
+    char="${string:i:1}"
+    case "$char" in
+      [a-zA-Z0-9.~_-]) out+="$char" ;;
+      *)
+        printf -v char '%%%02X' "'$char"
+        out+="$char"
+        ;;
+    esac
+  done
+  printf '%s' "$out"
 }
 
 normalize_version() {
@@ -292,6 +321,63 @@ obfs:
   salamander:
     password: $(yaml_quote "$obfs_password")
 EOF
+  fi
+}
+
+compose_share_uri() {
+  local auth="$1"
+  local authority="$2"
+  local tls_mode="$3"
+  local sni="${4:-}"
+  local pin="${5:-}"
+  local obfs="${6:-}"
+  local auth_enc name query=""
+  local -a params=()
+
+  if [[ "$tls_mode" == "selfsigned" ]]; then
+    [[ -n "$sni" ]] && params+=("sni=$(url_encode "$sni")")
+    [[ -n "$pin" ]] && params+=("pinSHA256=$(url_encode "$pin")")
+  fi
+  if [[ -n "$obfs" ]]; then
+    params+=("obfs=salamander" "obfs-password=$(url_encode "$obfs")")
+  fi
+
+  auth_enc="$(url_encode "$auth")"
+  name="${authority%:*}"
+  name="${name#[}"
+  name="${name%]}"
+
+  if ((${#params[@]} > 0)); then
+    local IFS='&'
+    query="?${params[*]}"
+  fi
+
+  printf 'hysteria2://%s@%s/%s#Hysteria2-%s\n' "$auth_enc" "$authority" "$query" "$name"
+}
+
+ensure_qrencode() {
+  command -v qrencode >/dev/null 2>&1 && return 0
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get install -y qrencode >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y qrencode >/dev/null 2>&1 || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y qrencode >/dev/null 2>&1 || true
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -Sy --noconfirm qrencode >/dev/null 2>&1 || true
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper --non-interactive install qrencode >/dev/null 2>&1 || true
+  fi
+  command -v qrencode >/dev/null 2>&1
+}
+
+print_share_qr() {
+  local uri="$1"
+  if ensure_qrencode; then
+    printf '\nScan this QR with your client (Shadowrocket / Stash / NekoBox):\n\n'
+    qrencode -t ANSIUTF8 "$uri" 2>/dev/null || qrencode -t UTF8 "$uri" 2>/dev/null || true
+  else
+    printf '\n(Tip: install qrencode to render a scannable QR code here.)\n'
   fi
 }
 
@@ -816,6 +902,23 @@ EOF
   ACME needs TCP 80/443 reachable from the public internet for certificate issuance.
 EOF
   fi
+
+  local share_uri
+  share_uri="$(compose_share_uri \
+    "$auth_password" \
+    "$(format_host_port "$host" "$port")" \
+    "$tls_mode" \
+    "$host" \
+    "$pin_sha256" \
+    "$obfs_password")"
+
+  cat <<EOF
+
+Client share link (import into Shadowrocket / Stash / NekoBox / v2rayN):
+$share_uri
+EOF
+
+  print_share_qr "$share_uri"
 }
 
 rollback_binary() {
@@ -896,6 +999,36 @@ update_flow() {
   log "Previous binary backup: $backup"
 }
 
+share_flow() {
+  require_root
+  [[ -f "$CLIENT_CONFIG" ]] || die "$CLIENT_CONFIG not found. Run: bash install.sh install"
+
+  local server_line auth sni pin obfs tls_mode uri
+  server_line="$(sed -n 's/^server:[[:space:]]*//p' "$CLIENT_CONFIG" | head -n1)"
+  auth="$(yaml_unquote "$(sed -n 's/^auth:[[:space:]]*//p' "$CLIENT_CONFIG" | head -n1)")"
+  sni="$(yaml_unquote "$(sed -n 's/^[[:space:]]\{1,\}sni:[[:space:]]*//p' "$CLIENT_CONFIG" | head -n1)")"
+  pin="$(yaml_unquote "$(sed -n 's/^[[:space:]]\{1,\}pinSHA256:[[:space:]]*//p' "$CLIENT_CONFIG" | head -n1)")"
+  obfs="$(yaml_unquote "$(sed -n 's/^[[:space:]]\{1,\}password:[[:space:]]*//p' "$CLIENT_CONFIG" | head -n1)")"
+
+  [[ -n "$server_line" && -n "$auth" ]] || die "Could not parse $CLIENT_CONFIG."
+
+  if [[ -n "$pin" || -n "$sni" ]]; then
+    tls_mode="selfsigned"
+  else
+    tls_mode="acme"
+  fi
+
+  uri="$(compose_share_uri "$auth" "$server_line" "$tls_mode" "$sni" "$pin" "$obfs")"
+
+  cat <<EOF
+
+Client share link (import into Shadowrocket / Stash / NekoBox / v2rayN):
+$uri
+EOF
+
+  print_share_qr "$uri"
+}
+
 main() {
   # Interactive prompts read from fd 3 rather than stdin. When the script is fed
   # through a pipe (e.g. `curl ... | bash`), stdin carries the script text, so
@@ -916,6 +1049,9 @@ main() {
       ;;
     update)
       update_flow
+      ;;
+    share)
+      share_flow
       ;;
     -h | --help | help)
       show_help
